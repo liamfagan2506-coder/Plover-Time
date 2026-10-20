@@ -40,14 +40,15 @@ model User {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  shifts        Shift[]          @relation("ShiftAssignee")
-  timesheets    Timesheet[]      @relation("TimesheetEmployee")
-  approvals     Timesheet[]      @relation("TimesheetApprover")
+  shifts        Shift[]            @relation("ShiftAssignee")
+  timesheets    Timesheet[]        @relation("TimesheetEmployee")
+  approvals     Timesheet[]        @relation("TimesheetApprover")
   claims        ShiftClaim[]
-  swapsFrom     SwapRequest[]    @relation("SwapFrom")
-  swapsTo       SwapRequest[]    @relation("SwapTo")
+  swapsFrom     SwapRequest[]      @relation("SwapFrom")
+  swapsTo       SwapRequest[]      @relation("SwapTo")
   notifications Notification[]
-  unavailable   Unavailability[]
+  availability  AvailabilityRule[] @relation("RuleOwner")
+  rulesCreated  AvailabilityRule[] @relation("RuleCreator")
 }
 
 model Site {
@@ -149,15 +150,26 @@ model Notification {
   @@index([userId, read])
 }
 
-// A day an employee can't work. date is local midnight (APP_TIMEZONE).
-model Unavailability {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  date      DateTime
-  note      String?
-  createdAt DateTime @default(now())
+// When an employee can't work. Dates are local midnight (APP_TIMEZONE); endDate is inclusive.
+// repeat: NONE (every day from startDate to endDate), WEEKLY or FORTNIGHTLY (on the listed
+// weekdays, fortnights counted from the week of startDate). Times are minutes after midnight;
+// an end time at or before the start time runs past midnight into the next day.
+model AvailabilityRule {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("RuleOwner", fields: [userId], references: [id], onDelete: Cascade)
+  repeat      String    @default("NONE")
+  weekdays    String    @default("") // comma-separated 0 (Sun) to 6 (Sat)
+  startDate   DateTime
+  endDate     DateTime?
+  allDay      Boolean   @default(true)
+  startMinute Int?
+  endMinute   Int?
+  note        String?
+  createdById String?
+  createdBy   User?     @relation("RuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  @@unique([userId, date])
-  @@index([date])
+  @@index([userId])
 }

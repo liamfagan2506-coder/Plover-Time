@@ -10,6 +10,7 @@ import { Flash, type PageParams } from "@/components/Flash";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RosterDnD } from "@/components/roster/RosterDnD";
 import { AutoDayView, PrintButton } from "@/components/roster/RosterClient";
+import { expandRules, type Block } from "@/lib/availability";
 
 type Params = Record<string, string | undefined>;
 
@@ -56,7 +57,7 @@ export default async function RosterPage({ searchParams }: { searchParams: PageP
   };
   const returnTo = href();
 
-  const [shifts, employees, sites, holidays, away] = await Promise.all([
+  const [shifts, employees, sites, holidays, rules] = await Promise.all([
     db.shift.findMany({
       where: { start: { gte: weekStart, lt: weekEnd }, status: { not: "CANCELLED" } },
       include: { site: true, employee: true },
@@ -65,10 +66,16 @@ export default async function RosterPage({ searchParams }: { searchParams: PageP
     db.user.findMany({ where: { active: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
     db.site.findMany({ orderBy: { name: "asc" } }),
     db.publicHoliday.findMany({ where: { date: { gte: weekStart, lt: weekEnd } } }),
-    db.unavailability.findMany({ where: { date: { gte: weekStart, lt: weekEnd } }, include: { user: true } }),
+    db.availabilityRule.findMany({
+      where: { startDate: { lt: weekEnd }, OR: [{ endDate: null }, { endDate: { gte: addLocalDays(weekStart, -1) } }] },
+    }),
   ]);
   const holidayKeys = new Set(holidays.map((h) => localDateKey(h.date)));
-  const awayMap = new Map(away.map((a) => [`${a.userId}|${localDateKey(a.date)}`, a.note ?? ""]));
+  // Unavailable windows this week, grouped by person and the day each window starts
+  const blocks = expandRules(rules, weekStart, weekEnd);
+  const awayMap = new Map<string, Block[]>();
+  for (const b of blocks) awayMap.set(`${b.userId}|${b.day}`, [...(awayMap.get(`${b.userId}|${b.day}`) ?? []), b]);
+  const names = new Map(employees.map((e) => [e.id, `${e.firstName} ${e.lastName}`]));
   const visible = siteFilter ? shifts.filter((s) => s.siteId === siteFilter) : shifts;
   const drafts = shifts.filter((s) => s.status === "DRAFT").length;
   const editing = params.shift && params.shift !== "new" ? shifts.find((s) => s.id === params.shift) : undefined;
@@ -232,20 +239,23 @@ export default async function RosterPage({ searchParams }: { searchParams: PageP
                       {days.map((d) => {
                         const key = localDateKey(d);
                         const cell = list.filter((s) => localDateKey(s.start) === key);
-                        const awayNote = group === "staff" && row.id ? awayMap.get(`${row.id}|${key}`) : undefined;
+                        const away = group === "staff" && row.id ? awayMap.get(`${row.id}|${key}`) : undefined;
+                        const allDay = away?.some((b) => b.label === "All day");
                         return (
                           <td
                             key={key}
                             data-day={key}
                             {...(group === "staff" ? { "data-emp": row.id } : { "data-site": row.id })}
-                            className={`group border-b border-l border-border p-1.5 ${awayNote !== undefined ? "bg-neutral-100 bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,rgba(0,0,0,0.04)_6px,rgba(0,0,0,0.04)_12px)]" : ""}`}
+                            className={`group border-b border-l border-border p-1.5 ${allDay ? "bg-neutral-100 bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,rgba(0,0,0,0.04)_6px,rgba(0,0,0,0.04)_12px)]" : ""}`}
                           >
                             <div className="space-y-1">
-                              {awayNote !== undefined && (
-                                <p className="rounded px-1 text-[10px] font-medium uppercase tracking-wide text-bad" title={awayNote || undefined}>
-                                  Unavailable{awayNote ? `: ${awayNote}` : ""}
+                              {away?.map((b) => (
+                                <p key={b.ruleId} className="rounded px-1 text-[10px] leading-tight font-medium text-bad" title={b.note ?? undefined}>
+                                  <span className="uppercase tracking-wide">Unavailable</span>{" "}
+                                  {b.label === "All day" ? "all day" : b.label}
+                                  {b.note && <span className="block font-normal text-muted">{b.note}</span>}
                                 </p>
-                              )}
+                              ))}
                               {cell.map(chip)}
                               <Link
                                 href={addLink(key, row)}
@@ -283,7 +293,7 @@ export default async function RosterPage({ searchParams }: { searchParams: PageP
           rows={rows}
           shifts={visible.filter((s) => localDateKey(s.start) === dayKey)}
           group={group}
-          away={away.filter((a) => localDateKey(a.date) === dayKey)}
+          away={blocks.filter((b) => b.day === dayKey).map((b) => ({ ...b, name: names.get(b.userId) ?? "Unknown" }))}
           isHoliday={holidayKeys.has(dayKey)}
           editHref={(id) => href({ shift: id })}
           addHref={(row) => addLink(dayKey, row)}
@@ -322,7 +332,7 @@ function DayView({ rows, shifts, group, away, isHoliday, editHref, addHref }: {
   rows: { id: string; name: string }[];
   shifts: DayShift[];
   group: "staff" | "site";
-  away: { id: string; note: string | null; user: { firstName: string; lastName: string } }[];
+  away: (Block & { name: string })[];
   isHoliday: boolean;
   editHref: (id: string) => string;
   addHref: (row: { id: string; name: string }) => string;
@@ -370,7 +380,9 @@ function DayView({ rows, shifts, group, away, isHoliday, editHref, addHref }: {
           <h2 className="mb-2 font-semibold">Unavailable</h2>
           <ul className="space-y-1 text-sm">
             {away.map((a) => (
-              <li key={a.id}>{a.user.firstName} {a.user.lastName}{a.note ? <span className="text-muted"> · {a.note}</span> : ""}</li>
+              <li key={`${a.ruleId}-${a.userId}`}>
+                {a.name} <span className="text-muted">· {a.label === "All day" ? "all day" : a.label}{a.note ? ` · ${a.note}` : ""}</span>
+              </li>
             ))}
           </ul>
         </section>

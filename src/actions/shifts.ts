@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireManager, requireUser } from "@/lib/auth";
 import { notify, notifyManagers } from "@/lib/notify";
+import { describeBlock, findBlock, type Block } from "@/lib/availability";
 import { back, num, optStr, str } from "@/lib/forms";
-import { addLocalDays, fmtDate, fmtRange, parseLocalDate, parseLocalInput, startOfLocalDay, zonedParts, zonedToUtc } from "@/lib/time";
+import { addLocalDays, fmtDate, fmtRange, parseLocalDate, parseLocalInput, zonedParts, zonedToUtc } from "@/lib/time";
 
 function describe(shift: { start: Date; end: Date; site: { name: string } }) {
   return `${fmtDate(shift.start)} ${fmtRange(shift.start, shift.end)} at ${shift.site.name}`;
@@ -24,16 +25,17 @@ async function findOverlap(employeeId: string, start: Date, end: Date, excludeId
   });
 }
 
-// Unavailability recorded for the local day the shift starts on
-async function findUnavailable(employeeId: string, start: Date) {
-  return db.unavailability.findUnique({
-    where: { userId_date: { userId: employeeId, date: startOfLocalDay(start) } },
-    include: { user: true },
-  });
+// The employee's availability rules that block any part of this shift, if any
+async function findUnavailable(employeeId: string, start: Date, end: Date) {
+  const rules = await db.availabilityRule.findMany({ where: { userId: employeeId } });
+  const block = findBlock(rules, start, end);
+  if (!block) return null;
+  const user = await db.user.findUniqueOrThrow({ where: { id: employeeId } });
+  return { ...block, user };
 }
 
-function unavailableMessage(u: { note: string | null; user: { firstName: string } }, start: Date) {
-  return `${u.user.firstName} has marked ${fmtDate(start)} as unavailable${u.note ? ` (${u.note})` : ""}.`;
+function unavailableMessage(u: Block & { user: { firstName: string } }) {
+  return `${u.user.firstName} is unavailable ${describeBlock(u)}${u.note ? ` (${u.note})` : ""}.`;
 }
 
 function readShiftForm(form: FormData) {
@@ -68,9 +70,9 @@ export async function saveShift(form: FormData) {
   if (data.employeeId) {
     const clash = await findOverlap(data.employeeId, data.start, data.end, id ?? undefined);
     if (clash) back(returnTo, { error: `That employee already has a shift ${describe(clash)}.` });
-    const away = await findUnavailable(data.employeeId, data.start);
+    const away = await findUnavailable(data.employeeId, data.start, data.end);
     if (away && form.get("allowUnavailable") !== "on") {
-      back(returnTo, { error: `${unavailableMessage(away, data.start)} Tick "Book anyway" to override.` });
+      back(returnTo, { error: `${unavailableMessage(away)} Tick "Book anyway" to override.` });
     }
   }
 
@@ -110,8 +112,8 @@ export async function moveShift(input: { id: string; day: string; employeeId?: s
   if (employeeId) {
     const clash = await findOverlap(employeeId, start, end, shift.id);
     if (clash) return { error: `Can't move it there: that person already has a shift ${describe(clash)}.` };
-    const away = await findUnavailable(employeeId, start);
-    if (away) return { error: `${unavailableMessage(away, start)} Open the shift and tick "Book anyway" to override.` };
+    const away = await findUnavailable(employeeId, start, end);
+    if (away) return { error: `${unavailableMessage(away)} Open the shift and tick "Book anyway" to override.` };
   }
 
   const wasLive = shift.status === "PUBLISHED" || shift.status === "OPEN";
@@ -204,7 +206,7 @@ export async function copyPreviousWeek(form: FormData) {
     if (have.has(key)) continue;
     have.add(key);
     const employeeId =
-      s.employeeId && !(await findOverlap(s.employeeId, start, end)) && !(await findUnavailable(s.employeeId, start)) ? s.employeeId : null;
+      s.employeeId && !(await findOverlap(s.employeeId, start, end)) && !(await findUnavailable(s.employeeId, start, end)) ? s.employeeId : null;
     if (s.employeeId && !employeeId) skipped++;
     await db.shift.create({
       data: { siteId: s.siteId, employeeId, start, end, breakMinutes: s.breakMinutes, role: s.role, notes: s.notes, status: "DRAFT" },
@@ -296,7 +298,8 @@ export async function requestSwap(form: FormData) {
   const to = await db.user.findUniqueOrThrow({ where: { id: toId } });
   const clash = await findOverlap(toId, shift.start, shift.end);
   if (clash) back("/swaps", { error: `${to.firstName} already has a shift at that time.` });
-  if (await findUnavailable(toId, shift.start)) back("/swaps", { error: `${to.firstName} is unavailable that day.` });
+  const away = await findUnavailable(toId, shift.start, shift.end);
+  if (away) back("/swaps", { error: `${unavailableMessage(away)} Choose someone else.` });
   const existing = await db.swapRequest.findFirst({ where: { shiftId: shift.id, status: "PENDING" } });
   if (existing) back("/swaps", { error: "There's already a pending swap for this shift." });
 
