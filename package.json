@@ -10,7 +10,8 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "setup": "prisma db push && prisma db seed",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "demo:reset": "node --env-file=.env node_modules/tsx/dist/cli.mjs scripts/reset-demo.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
