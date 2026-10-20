@@ -15,5 +15,5 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Skip the login page, the calendar feed (secured by its own link token) and static files
-  matcher: ["/((?!login|calendar/|_next/static|_next/image|.*\..*).*)"],
+  matcher: ["/((?!login|calendar/|_next/static|_next/image|.*\\..*).*)"],
 };
