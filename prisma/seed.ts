@@ -61,7 +61,7 @@ async function main() {
   const manager = await db.user.upsert({
     where: { email: "manager@ploversecurity.com.au" },
     update: {},
-    create: { email: "manager@ploversecurity.com.au", passwordHash, firstName: "Morgan", lastName: "Reid", role: "MANAGER", ...rates },
+    create: { email: "manager@ploversecurity.com.au", passwordHash, firstName: "Christine", lastName: "Plover", role: "MANAGER", ...rates },
   });
 
   const guardNames = [
