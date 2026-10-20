@@ -198,17 +198,17 @@ async function MyPay({ userId }: { userId: string }) {
         <h2 className="h2">This pay fortnight</h2>
         <p className="text-xs text-muted">{fmtDate(start)} – {fmtDate(addLocalDays(end, -1))}</p>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
         <div>
-          <p className="text-2xl font-semibold">{fmtHours(worked)}</p>
+          <p className="text-xl font-semibold sm:text-2xl">{fmtHours(worked)}</p>
           <p className="text-xs text-muted">worked ({fmtHours(approved)} approved)</p>
         </div>
         <div>
-          <p className="text-2xl font-semibold">{fmtMoney(pay)}</p>
+          <p className="text-xl font-semibold sm:text-2xl">{fmtMoney(pay)}</p>
           <p className="text-xs text-muted">earned so far</p>
         </div>
         <div>
-          <p className="text-2xl font-semibold">{fmtHours(ahead)}</p>
+          <p className="text-xl font-semibold sm:text-2xl">{fmtHours(ahead)}</p>
           <p className="text-xs text-muted">still rostered (≈ {fmtMoney(aheadPay)})</p>
         </div>
       </div>
