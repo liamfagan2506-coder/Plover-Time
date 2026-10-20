@@ -7,6 +7,7 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Plover Time",
   description: "Rostering and timesheets for Plover Security Services",
+  appleWebApp: { capable: true, title: "Plover Time", statusBarStyle: "black" },
 };
 
 export const viewport: Viewport = {

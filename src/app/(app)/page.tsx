@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireUser, isManager } from "@/lib/auth";
-import { addLocalDays, fmtDate, fmtDateLong, fmtRange, fmtTime, startOfLocalDay } from "@/lib/time";
+import { addLocalDays, fmtDate, fmtDateLong, fmtHours, fmtRange, fmtTime, localDateKey, startOfLocalDay } from "@/lib/time";
+import { costOf, fmtMoney, paidHours, payPeriodFor, round2, splitByDay } from "@/lib/pay";
 import { clockIn, clockOut } from "@/actions/timesheets";
 import { Flash, type PageParams } from "@/components/Flash";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -73,6 +74,8 @@ export default async function HomePage({ searchParams }: { searchParams: PagePar
               <p className="text-sm text-muted">You have no upcoming shifts. Check <Link className="underline" href="/open-shifts">open shifts</Link> to pick one up.</p>
             )}
           </section>
+
+          <MyPay userId={user.id} />
 
           {comingUp.length > 0 && (
             <section className="card">
@@ -169,5 +172,47 @@ async function ManagerToday() {
         </ul>
       </section>
     </>
+  );
+}
+
+// Hours and estimated gross pay for the current pay fortnight
+async function MyPay({ userId }: { userId: string }) {
+  const now = new Date();
+  const { start, end } = payPeriodFor(now);
+  const [user, sheets, rostered, holidays] = await Promise.all([
+    db.user.findUniqueOrThrow({ where: { id: userId } }),
+    db.timesheet.findMany({ where: { employeeId: userId, clockIn: { gte: start, lt: end }, clockOut: { not: null }, status: { not: "REJECTED" } } }),
+    db.shift.findMany({ where: { employeeId: userId, status: "PUBLISHED", start: { gte: now, lt: end }, timesheet: null } }),
+    db.publicHoliday.findMany({ where: { date: { gte: start, lt: end } } }),
+  ]);
+  const hol = new Set(holidays.map((h) => localDateKey(h.date)));
+  const worked = round2(sheets.reduce((h, t) => h + paidHours(t.clockIn, t.clockOut!, t.breakMinutes), 0));
+  const approved = round2(sheets.filter((t) => t.status !== "PENDING").reduce((h, t) => h + paidHours(t.clockIn, t.clockOut!, t.breakMinutes), 0));
+  const pay = round2(sheets.reduce((p, t) => p + costOf(splitByDay(t.clockIn, t.clockOut!, t.breakMinutes, hol), user), 0));
+  const ahead = round2(rostered.reduce((h, s) => h + paidHours(s.start, s.end, s.breakMinutes), 0));
+  const aheadPay = round2(rostered.reduce((p, s) => p + costOf(splitByDay(s.start, s.end, s.breakMinutes, hol), user), 0));
+
+  return (
+    <section className="card">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="h2">This pay fortnight</h2>
+        <p className="text-xs text-muted">{fmtDate(start)} – {fmtDate(addLocalDays(end, -1))}</p>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <p className="text-2xl font-semibold">{fmtHours(worked)}</p>
+          <p className="text-xs text-muted">worked ({fmtHours(approved)} approved)</p>
+        </div>
+        <div>
+          <p className="text-2xl font-semibold">{fmtMoney(pay)}</p>
+          <p className="text-xs text-muted">earned so far</p>
+        </div>
+        <div>
+          <p className="text-2xl font-semibold">{fmtHours(ahead)}</p>
+          <p className="text-xs text-muted">still rostered (≈ {fmtMoney(aheadPay)})</p>
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-muted">Estimates before tax and super. Your payslip is the final figure.</p>
+    </section>
   );
 }

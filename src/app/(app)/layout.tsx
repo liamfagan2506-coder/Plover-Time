@@ -22,6 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/roster", label: manager ? "Roster" : "My shifts" },
     { href: "/open-shifts", label: "Open shifts", count: manager ? pendingClaims : openShifts },
     { href: "/swaps", label: "Shift swaps", count: pendingSwaps },
+    { href: "/availability", label: "Availability" },
     { href: "/timesheets", label: "Timesheets", count: pendingTimesheets },
     { href: "/notifications", label: "Notifications", count: unread },
   ];
@@ -39,9 +40,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="min-h-dvh lg:pl-60">
-      <Nav items={items} userName={`${user.firstName} ${user.lastName}`} role={user.role} logoutAction={logout} />
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+    <div className="min-h-dvh lg:pl-60 print:pl-0">
+      <Nav items={items} userName={`${user.firstName} ${user.lastName}`} role={user.role} unread={unread} logoutAction={logout} />
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 print:max-w-none print:p-0">{children}</main>
     </div>
   );
 }

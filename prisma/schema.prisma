@@ -18,33 +18,36 @@ datasource db {
 // Swap/claim status: PENDING, APPROVED, REJECTED
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  firstName    String
-  lastName     String
-  phone        String?
-  role         String   @default("EMPLOYEE")
-  active       Boolean  @default(true)
+  id                String   @id @default(cuid())
+  email             String   @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  phone             String?
+  role              String   @default("EMPLOYEE")
+  active            Boolean  @default(true)
   // Xero Payroll employee identifier, used in the timesheet export
-  xeroEmployeeId String?
+  xeroEmployeeId    String?
   // Flat hourly rates (AUD). Edited by admins on the Pay rates screen.
-  rateWeekday      Float @default(0)
-  rateSaturday     Float @default(0)
-  rateSunday       Float @default(0)
-  ratePublicHoliday Float @default(0)
-  notifyEmail  Boolean  @default(true)
-  notifySms    Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  rateWeekday       Float    @default(0)
+  rateSaturday      Float    @default(0)
+  rateSunday        Float    @default(0)
+  ratePublicHoliday Float    @default(0)
+  // Secret token in the personal calendar feed link (/calendar/<token>.ics)
+  calendarToken     String?  @unique
+  notifyEmail       Boolean  @default(true)
+  notifySms         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  shifts        Shift[]        @relation("ShiftAssignee")
-  timesheets    Timesheet[]    @relation("TimesheetEmployee")
-  approvals     Timesheet[]    @relation("TimesheetApprover")
+  shifts        Shift[]          @relation("ShiftAssignee")
+  timesheets    Timesheet[]      @relation("TimesheetEmployee")
+  approvals     Timesheet[]      @relation("TimesheetApprover")
   claims        ShiftClaim[]
-  swapsFrom     SwapRequest[]  @relation("SwapFrom")
-  swapsTo       SwapRequest[]  @relation("SwapTo")
+  swapsFrom     SwapRequest[]    @relation("SwapFrom")
+  swapsTo       SwapRequest[]    @relation("SwapTo")
   notifications Notification[]
+  unavailable   Unavailability[]
 }
 
 model Site {
@@ -67,7 +70,7 @@ model Shift {
   start        DateTime
   end          DateTime
   breakMinutes Int      @default(0)
-  role         String?  // e.g. "Static guard", "Patrol", "Crowd control"
+  role         String? // e.g. "Static guard", "Patrol", "Crowd control"
   notes        String?
   status       String   @default("DRAFT")
   createdAt    DateTime @default(now())
@@ -115,23 +118,23 @@ model ShiftClaim {
 }
 
 model SwapRequest {
-  id         String   @id @default(cuid())
-  shiftId    String
-  shift      Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
-  fromId     String
-  from       User     @relation("SwapFrom", fields: [fromId], references: [id])
-  toId       String
-  to         User     @relation("SwapTo", fields: [toId], references: [id])
+  id           String   @id @default(cuid())
+  shiftId      String
+  shift        Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  fromId       String
+  from         User     @relation("SwapFrom", fields: [fromId], references: [id])
+  toId         String
+  to           User     @relation("SwapTo", fields: [toId], references: [id])
   // Accepted by the receiving employee, then approved by a manager
-  acceptedByTo Boolean @default(false)
-  status     String   @default("PENDING")
-  createdAt  DateTime @default(now())
+  acceptedByTo Boolean  @default(false)
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
 }
 
 model PublicHoliday {
-  id    String   @id @default(cuid())
-  date  DateTime @unique
-  name  String
+  id   String   @id @default(cuid())
+  date DateTime @unique
+  name String
 }
 
 model Notification {
@@ -144,4 +147,17 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+}
+
+// A day an employee can't work. date is local midnight (APP_TIMEZONE).
+model Unavailability {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date])
+  @@index([date])
 }

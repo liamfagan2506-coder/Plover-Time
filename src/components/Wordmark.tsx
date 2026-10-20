@@ -1,19 +1,12 @@
-export function Wordmark({ inverted = false }: { inverted?: boolean }) {
+/* eslint-disable @next/next/no-img-element */
+
+// Plover Security logo with the "Time" product name. The logo sits on black,
+// so on light pages it is shown inside a black panel.
+export function Wordmark({ inverted = false, large = false }: { inverted?: boolean; large?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span
-        className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-bold ${
-          inverted ? "bg-white text-black" : "bg-black text-white"
-        }`}
-      >
-        PT
-      </span>
-      <span className="leading-tight">
-        <span className="block text-base font-semibold tracking-tight">Plover Time</span>
-        <span className={`block text-[11px] uppercase tracking-widest ${inverted ? "text-neutral-400" : "text-muted"}`}>
-          Plover Security
-        </span>
-      </span>
+    <div className={`flex items-center gap-3 ${inverted ? "" : "rounded-xl bg-black px-5 py-4"}`}>
+      <img src="/plover-logo.png" alt="Plover Security" width={600} height={249} className={large ? "h-16 w-auto" : "h-9 w-auto"} />
+      <span className={`border-l border-white/25 pl-3 font-semibold tracking-tight text-white ${large ? "text-2xl" : "text-base"}`}>Time</span>
     </div>
   );
 }

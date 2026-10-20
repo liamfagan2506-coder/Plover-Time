@@ -7,10 +7,11 @@ import { Wordmark } from "./Wordmark";
 
 export type NavItem = { href: string; label: string; count?: number; section?: string };
 
-export function Nav({ items, userName, role, logoutAction }: {
+export function Nav({ items, userName, role, unread, logoutAction }: {
   items: NavItem[];
   userName: string;
   role: string;
+  unread: number;
   logoutAction: () => Promise<void>;
 }) {
   const path = usePathname();
@@ -60,7 +61,7 @@ export function Nav({ items, userName, role, logoutAction }: {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col justify-between bg-black p-4 text-white lg:flex">
+      <aside className="fixed inset-y-0 left-0 hidden w-60 print:!hidden flex-col justify-between bg-black p-4 text-white lg:flex">
         <div>
           <div className="mb-6 px-2"><Wordmark inverted /></div>
           {links}
@@ -69,13 +70,26 @@ export function Nav({ items, userName, role, logoutAction }: {
       </aside>
 
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-30 flex items-center justify-between bg-black px-4 py-3 text-white lg:hidden">
+      <header className="sticky top-0 z-30 flex print:hidden items-center justify-between bg-black px-4 py-3 text-white lg:hidden">
         <Wordmark inverted />
+        <div className="flex items-center gap-1">
+        <Link href="/notifications" onClick={() => setOpen(false)} className="relative rounded-lg p-2 hover:bg-white/10"
+          aria-label={unread ? `${unread} unread notifications` : "Notifications"}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+          </svg>
+          {unread > 0 && (
+            <span className="absolute top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
+        </Link>
         <button onClick={() => setOpen(!open)} className="cursor-pointer rounded-lg p-2 hover:bg-white/10" aria-label="Menu">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             {open ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
           </svg>
         </button>
+        </div>
       </header>
       {open && (
         <div className="fixed inset-x-0 top-[60px] bottom-0 z-20 flex flex-col justify-between overflow-y-auto bg-black p-4 lg:hidden">

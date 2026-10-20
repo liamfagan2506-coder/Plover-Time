@@ -1,4 +1,4 @@
-import { localDateKey, zonedParts, startOfLocalDay, addLocalDays } from "./time";
+import { localDateKey, zonedParts, startOfLocalDay, addLocalDays, parseLocalDate } from "./time";
 
 export type RateCategory = "WEEKDAY" | "SATURDAY" | "SUNDAY" | "PUBLIC_HOLIDAY";
 
@@ -85,4 +85,14 @@ export function round2(n: number): number {
 
 export function fmtMoney(n: number): string {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n);
+}
+
+// Fortnightly pay periods counted from PAY_PERIOD_START (a Monday, "YYYY-MM-DD").
+// Set it to the first day of any real Plover pay fortnight so the periods line up.
+export function payPeriodFor(date: Date) {
+  const anchor = parseLocalDate(process.env.PAY_PERIOD_START || "2026-01-05");
+  // Whole local days since the anchor (rounded, so daylight saving shifts don't matter)
+  const days = Math.round((startOfLocalDay(date).getTime() - anchor.getTime()) / 86_400_000);
+  const start = addLocalDays(anchor, Math.floor(days / 14) * 14);
+  return { start, end: addLocalDays(start, 14) };
 }

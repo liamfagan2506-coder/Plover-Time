@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { requireManager, requireUser } from "@/lib/auth";
 import { notify, notifyManagers } from "@/lib/notify";
 import { back, num, optStr, str } from "@/lib/forms";
-import { addLocalDays, fmtDate, fmtRange, parseLocalDate, parseLocalInput } from "@/lib/time";
+import { addLocalDays, fmtDate, fmtRange, parseLocalDate, parseLocalInput, startOfLocalDay, zonedParts, zonedToUtc } from "@/lib/time";
 
 function describe(shift: { start: Date; end: Date; site: { name: string } }) {
   return `${fmtDate(shift.start)} ${fmtRange(shift.start, shift.end)} at ${shift.site.name}`;
@@ -22,6 +22,18 @@ async function findOverlap(employeeId: string, start: Date, end: Date, excludeId
     },
     include: { site: true },
   });
+}
+
+// Unavailability recorded for the local day the shift starts on
+async function findUnavailable(employeeId: string, start: Date) {
+  return db.unavailability.findUnique({
+    where: { userId_date: { userId: employeeId, date: startOfLocalDay(start) } },
+    include: { user: true },
+  });
+}
+
+function unavailableMessage(u: { note: string | null; user: { firstName: string } }, start: Date) {
+  return `${u.user.firstName} has marked ${fmtDate(start)} as unavailable${u.note ? ` (${u.note})` : ""}.`;
 }
 
 function readShiftForm(form: FormData) {
@@ -56,6 +68,10 @@ export async function saveShift(form: FormData) {
   if (data.employeeId) {
     const clash = await findOverlap(data.employeeId, data.start, data.end, id ?? undefined);
     if (clash) back(returnTo, { error: `That employee already has a shift ${describe(clash)}.` });
+    const away = await findUnavailable(data.employeeId, data.start);
+    if (away && form.get("allowUnavailable") !== "on") {
+      back(returnTo, { error: `${unavailableMessage(away, data.start)} Tick "Book anyway" to override.` });
+    }
   }
 
   if (id) {
@@ -73,6 +89,47 @@ export async function saveShift(form: FormData) {
   }
   revalidatePath("/", "layout");
   back(returnTo, { ok: id ? "Shift updated." : "Shift added as a draft. Publish the week to notify staff." });
+}
+
+// Drag and drop: move a shift to another day (keeping its times) and/or another person or site
+export async function moveShift(input: { id: string; day: string; employeeId?: string | null; siteId?: string }): Promise<{ error?: string }> {
+  await requireManager();
+  const shift = await db.shift.findUnique({ where: { id: input.id }, include: { timesheet: true } });
+  if (!shift) return { error: "That shift no longer exists." };
+  if (shift.timesheet) return { error: "This shift has been worked, so it can't be moved." };
+  if (shift.status === "CANCELLED") return { error: "That shift was cancelled." };
+
+  const m = input.day.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return { error: "Invalid day." };
+  const p = zonedParts(shift.start);
+  const start = zonedToUtc(+m[1], +m[2], +m[3], p.hour, p.minute);
+  const end = new Date(start.getTime() + (shift.end.getTime() - shift.start.getTime()));
+  const employeeId = input.employeeId === undefined ? shift.employeeId : input.employeeId || null;
+  const siteId = input.siteId ?? shift.siteId;
+
+  if (employeeId) {
+    const clash = await findOverlap(employeeId, start, end, shift.id);
+    if (clash) return { error: `Can't move it there: that person already has a shift ${describe(clash)}.` };
+    const away = await findUnavailable(employeeId, start);
+    if (away) return { error: `${unavailableMessage(away, start)} Open the shift and tick "Book anyway" to override.` };
+  }
+
+  const wasLive = shift.status === "PUBLISHED" || shift.status === "OPEN";
+  const status = wasLive ? (employeeId ? "PUBLISHED" : "OPEN") : shift.status;
+  const updated = await db.shift.update({
+    where: { id: shift.id },
+    data: { start, end, employeeId, siteId, status },
+    include: { site: true, employee: true },
+  });
+  if (wasLive) {
+    if (updated.employee) await notify([updated.employee], "Shift updated", `Your shift is now ${describe(updated)}.`);
+    if (shift.employeeId && shift.employeeId !== employeeId) {
+      const prev = await db.user.findUnique({ where: { id: shift.employeeId } });
+      if (prev) await notify([prev], "Shift removed", `You're no longer rostered for ${describe(updated)}.`);
+    }
+  }
+  revalidatePath("/", "layout");
+  return {};
 }
 
 export async function cancelShift(form: FormData) {
@@ -146,7 +203,8 @@ export async function copyPreviousWeek(form: FormData) {
     const key = `${s.siteId}|${start.getTime()}|${end.getTime()}`;
     if (have.has(key)) continue;
     have.add(key);
-    const employeeId = s.employeeId && !(await findOverlap(s.employeeId, start, end)) ? s.employeeId : null;
+    const employeeId =
+      s.employeeId && !(await findOverlap(s.employeeId, start, end)) && !(await findUnavailable(s.employeeId, start)) ? s.employeeId : null;
     if (s.employeeId && !employeeId) skipped++;
     await db.shift.create({
       data: { siteId: s.siteId, employeeId, start, end, breakMinutes: s.breakMinutes, role: s.role, notes: s.notes, status: "DRAFT" },
@@ -156,7 +214,7 @@ export async function copyPreviousWeek(form: FormData) {
   if (copied === 0) back(returnTo, { error: "This week already has all of last week's shifts. Nothing was copied." });
   revalidatePath("/", "layout");
   back(returnTo, {
-    ok: `Copied ${copied} shift(s) as drafts.${skipped ? ` ${skipped} were left unassigned because of clashes.` : ""} Not right? Use "Clear drafts" to undo.`,
+    ok: `Copied ${copied} shift(s) as drafts.${skipped ? ` ${skipped} were left unassigned because of clashes or unavailability.` : ""} Not right? Use "Clear drafts" to undo.`,
   });
 }
 
@@ -238,6 +296,7 @@ export async function requestSwap(form: FormData) {
   const to = await db.user.findUniqueOrThrow({ where: { id: toId } });
   const clash = await findOverlap(toId, shift.start, shift.end);
   if (clash) back("/swaps", { error: `${to.firstName} already has a shift at that time.` });
+  if (await findUnavailable(toId, shift.start)) back("/swaps", { error: `${to.firstName} is unavailable that day.` });
   const existing = await db.swapRequest.findFirst({ where: { shiftId: shift.id, status: "PENDING" } });
   if (existing) back("/swaps", { error: "There's already a pending swap for this shift." });
 
