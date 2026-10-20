@@ -27,6 +27,8 @@ export default async function HomePage({ searchParams }: { searchParams: PagePar
   const canClockIn = next && next.start.getTime() - now.getTime() <= 60 * 60_000;
   // While on shift the clock-out card replaces "next shift", so list every upcoming shift
   const comingUp = active ? upcoming : upcoming.slice(1);
+  // Managers only see the personal shift and pay cards when they're rostered themselves
+  const showPersonal = !manager || !!active || upcoming.length > 0;
 
   return (
     <div>
@@ -37,7 +39,7 @@ export default async function HomePage({ searchParams }: { searchParams: PagePar
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {/* Clock in / out */}
-          <section className="card">
+          {showPersonal && <section className="card">
             {active ? (
               <form action={clockOut} className="space-y-4">
                 <input type="hidden" name="id" value={active.id} />
@@ -73,9 +75,9 @@ export default async function HomePage({ searchParams }: { searchParams: PagePar
             ) : (
               <p className="text-sm text-muted">You have no upcoming shifts. Check <Link className="underline" href="/open-shifts">open shifts</Link> to pick one up.</p>
             )}
-          </section>
+          </section>}
 
-          <MyPay userId={user.id} />
+          {showPersonal && <MyPay userId={user.id} />}
 
           {comingUp.length > 0 && (
             <section className="card">
