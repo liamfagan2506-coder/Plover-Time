@@ -3,7 +3,8 @@ import { db } from "@/lib/db";
 import { requireUser, isManager } from "@/lib/auth";
 import { addLocalDays, fmtDate, fmtDateLong, fmtHours, fmtRange, localDateKey, parseLocalDate, startOfWeek, toLocalInput } from "@/lib/time";
 import { costOf, fmtMoney, paidHours, splitByDay } from "@/lib/pay";
-import { cancelShift, copyPreviousWeek, publishWeek, saveShift } from "@/actions/shifts";
+import { cancelShift, clearDrafts, copyPreviousWeek, publishWeek, saveShift } from "@/actions/shifts";
+import { ConfirmButton } from "@/components/ConfirmButton";
 import { Flash, type PageParams } from "@/components/Flash";
 import { StatusBadge } from "@/components/StatusBadge";
 
@@ -115,8 +116,16 @@ export default async function RosterPage({ searchParams }: { searchParams: PageP
         </form>
         <form action={copyPreviousWeek}>
           <input type="hidden" name="week" value={weekKey} />
-          <button className="btn-secondary">Copy last week</button>
+          <ConfirmButton className="btn-secondary" message="Copy all of last week's shifts into this week as drafts?">Copy last week</ConfirmButton>
         </form>
+        {drafts > 0 && (
+          <form action={clearDrafts}>
+            <input type="hidden" name="week" value={weekKey} />
+            <ConfirmButton className="btn-danger" message={`Delete all ${drafts} draft shift(s) this week? Published shifts won't be affected.`}>
+              Clear drafts
+            </ConfirmButton>
+          </form>
+        )}
       </div>
 
       {showForm && (

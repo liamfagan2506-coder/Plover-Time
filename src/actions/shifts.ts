@@ -130,20 +130,45 @@ export async function copyPreviousWeek(form: FormData) {
   const returnTo = `/roster?week=${week}`;
   const prev = await db.shift.findMany({ where: { start: { gte: prevStart, lt: weekStart }, status: { not: "CANCELLED" } } });
   if (prev.length === 0) back(returnTo, { error: "Last week has no shifts to copy." });
+
+  // Skip shifts this week already has (same site and times), so copying twice adds nothing
+  const existing = await db.shift.findMany({
+    where: { start: { gte: weekStart, lt: addLocalDays(weekStart, 7) }, status: { not: "CANCELLED" } },
+    select: { siteId: true, start: true, end: true },
+  });
+  const have = new Set(existing.map((s) => `${s.siteId}|${s.start.getTime()}|${s.end.getTime()}`));
+
+  let copied = 0;
   let skipped = 0;
   for (const s of prev) {
     const start = addLocalDays(s.start, 7);
     const end = addLocalDays(s.end, 7);
+    const key = `${s.siteId}|${start.getTime()}|${end.getTime()}`;
+    if (have.has(key)) continue;
+    have.add(key);
     const employeeId = s.employeeId && !(await findOverlap(s.employeeId, start, end)) ? s.employeeId : null;
     if (s.employeeId && !employeeId) skipped++;
     await db.shift.create({
       data: { siteId: s.siteId, employeeId, start, end, breakMinutes: s.breakMinutes, role: s.role, notes: s.notes, status: "DRAFT" },
     });
+    copied++;
   }
+  if (copied === 0) back(returnTo, { error: "This week already has all of last week's shifts. Nothing was copied." });
   revalidatePath("/", "layout");
   back(returnTo, {
-    ok: `Copied ${prev.length} shift(s) as drafts.${skipped ? ` ${skipped} were left unassigned because of clashes.` : ""}`,
+    ok: `Copied ${copied} shift(s) as drafts.${skipped ? ` ${skipped} were left unassigned because of clashes.` : ""} Not right? Use "Clear drafts" to undo.`,
   });
+}
+
+export async function clearDrafts(form: FormData) {
+  await requireManager();
+  const week = str(form, "week");
+  const weekStart = parseLocalDate(week);
+  const { count } = await db.shift.deleteMany({
+    where: { status: "DRAFT", start: { gte: weekStart, lt: addLocalDays(weekStart, 7) }, timesheet: null },
+  });
+  revalidatePath("/", "layout");
+  back(`/roster?week=${week}`, count ? { ok: `Removed ${count} draft shift(s). Published shifts were not touched.` } : { error: "There are no drafts this week." });
 }
 
 // ---- Open shifts ----
