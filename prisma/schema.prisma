@@ -1,0 +1,147 @@
+// Plover Time database schema.
+// Postgres (hosted on Neon). DATABASE_URL is the pooled connection the app uses;
+// DIRECT_URL is the direct connection Prisma uses to create and change tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Roles: ADMIN, MANAGER, EMPLOYEE
+// Shift status: DRAFT, PUBLISHED, OPEN (unassigned, claimable), CANCELLED
+// Timesheet status: PENDING, APPROVED, REJECTED, EXPORTED
+// Swap/claim status: PENDING, APPROVED, REJECTED
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         String   @default("EMPLOYEE")
+  active       Boolean  @default(true)
+  // Xero Payroll employee identifier, used in the timesheet export
+  xeroEmployeeId String?
+  // Flat hourly rates (AUD). Edited by admins on the Pay rates screen.
+  rateWeekday      Float @default(0)
+  rateSaturday     Float @default(0)
+  rateSunday       Float @default(0)
+  ratePublicHoliday Float @default(0)
+  notifyEmail  Boolean  @default(true)
+  notifySms    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  shifts        Shift[]        @relation("ShiftAssignee")
+  timesheets    Timesheet[]    @relation("TimesheetEmployee")
+  approvals     Timesheet[]    @relation("TimesheetApprover")
+  claims        ShiftClaim[]
+  swapsFrom     SwapRequest[]  @relation("SwapFrom")
+  swapsTo       SwapRequest[]  @relation("SwapTo")
+  notifications Notification[]
+}
+
+model Site {
+  id        String   @id @default(cuid())
+  name      String
+  client    String?
+  address   String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  shifts    Shift[]
+}
+
+model Shift {
+  id           String   @id @default(cuid())
+  siteId       String
+  site         Site     @relation(fields: [siteId], references: [id])
+  employeeId   String?
+  employee     User?    @relation("ShiftAssignee", fields: [employeeId], references: [id])
+  start        DateTime
+  end          DateTime
+  breakMinutes Int      @default(0)
+  role         String?  // e.g. "Static guard", "Patrol", "Crowd control"
+  notes        String?
+  status       String   @default("DRAFT")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  timesheet Timesheet?
+  claims    ShiftClaim[]
+  swaps     SwapRequest[]
+
+  @@index([start])
+  @@index([employeeId])
+}
+
+model Timesheet {
+  id           String    @id @default(cuid())
+  shiftId      String?   @unique
+  shift        Shift?    @relation(fields: [shiftId], references: [id])
+  employeeId   String
+  employee     User      @relation("TimesheetEmployee", fields: [employeeId], references: [id])
+  clockIn      DateTime
+  clockOut     DateTime?
+  breakMinutes Int       @default(0)
+  notes        String?
+  status       String    @default("PENDING")
+  approverId   String?
+  approver     User?     @relation("TimesheetApprover", fields: [approverId], references: [id])
+  approvedAt   DateTime?
+  exportedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([employeeId, clockIn])
+}
+
+model ShiftClaim {
+  id         String   @id @default(cuid())
+  shiftId    String
+  shift      Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   User     @relation(fields: [employeeId], references: [id])
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+
+  @@unique([shiftId, employeeId])
+}
+
+model SwapRequest {
+  id         String   @id @default(cuid())
+  shiftId    String
+  shift      Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  fromId     String
+  from       User     @relation("SwapFrom", fields: [fromId], references: [id])
+  toId       String
+  to         User     @relation("SwapTo", fields: [toId], references: [id])
+  // Accepted by the receiving employee, then approved by a manager
+  acceptedByTo Boolean @default(false)
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+}
+
+model PublicHoliday {
+  id    String   @id @default(cuid())
+  date  DateTime @unique
+  name  String
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
